@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "crates/leaseq-core",
+    "crates/leaseq-runner",
+    "crates/leaseq",
+]
+default-members = ["crates/leaseq"]
+resolver = "2"
