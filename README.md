@@ -44,7 +44,7 @@ Just atomic file renames on a shared filesystem.
 ### From source
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/leaseq.git
+git clone https://github.com/JiwanChung/leaseq.git
 cd leaseq
 cargo build --release
 
