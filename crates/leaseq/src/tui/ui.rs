@@ -26,7 +26,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 Constraint::Min(0),     // Logs (takes all space)
                 Constraint::Length(1),  // Footer
             ])
-            .split(f.size());
+            .split(f.area());
 
         draw_header(f, app, chunks[0]);
         draw_logs(f, app, chunks[1]);
@@ -41,7 +41,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 Constraint::Length(10), // Logs pane
                 Constraint::Length(1),  // Footer
             ])
-            .split(f.size());
+            .split(f.area());
 
         // Split top row into 3 columns
         let top_row = Layout::default()
@@ -318,14 +318,15 @@ fn draw_add_task_popup(f: &mut Frame, app: &App) {
         .borders(Borders::ALL)
         .title(" Add Task ")
         .style(Style::default().fg(Color::Cyan));
-    let area = centered_rect(60, 20, f.size());
+    let area = centered_rect(60, 20, f.area());
     f.render_widget(Clear, area); // Clear background
+    #[allow(deprecated)]
     f.render_widget(app.textarea.widget(), block.inner(area));
     f.render_widget(block, area);
 }
 
 fn draw_create_lease_popup(f: &mut Frame, app: &App) {
-    let area = centered_rect(50, 55, f.size());
+    let area = centered_rect(50, 55, f.area());
     f.render_widget(Clear, area);
 
     let block = Block::default()
@@ -362,13 +363,14 @@ fn draw_create_lease_popup(f: &mut Frame, app: &App) {
         let style = if is_active { Style::default().fg(Color::Yellow) } else { Style::default() };
         let block = Block::default().borders(Borders::ALL).title(*label).style(style);
 
+        #[allow(deprecated)]
         f.render_widget(textarea.widget(), block.inner(chunks[i]));
         f.render_widget(block, chunks[i]);
     }
 }
 
 fn draw_node_details_popup(f: &mut Frame, app: &App) {
-    let area = centered_rect(50, 35, f.size());
+    let area = centered_rect(50, 35, f.area());
     f.render_widget(Clear, area);
 
     let block = Block::default()
@@ -426,7 +428,7 @@ fn draw_node_details_popup(f: &mut Frame, app: &App) {
 }
 
 fn draw_help_popup(f: &mut Frame) {
-    let area = centered_rect(60, 80, f.size());
+    let area = centered_rect(60, 80, f.area());
     let block = Block::default().borders(Borders::ALL).title(" Help ").style(Style::default().bg(Color::Blue));
     let text = vec![
         "Pane Navigation:",

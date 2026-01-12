@@ -61,6 +61,7 @@ pub async fn run(command: LeaseCommands) -> Result<()> {
 }
 
 /// Result of lease creation for TUI display
+#[allow(dead_code)]
 pub struct LeaseCreateResult {
     pub job_id: String,
     pub message: String,
