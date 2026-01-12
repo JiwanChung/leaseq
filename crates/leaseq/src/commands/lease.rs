@@ -60,14 +60,20 @@ pub async fn run(command: LeaseCommands) -> Result<()> {
     }
 }
 
-pub async fn create_lease(args: CreateLeaseArgs) -> Result<()> {
+/// Result of lease creation for TUI display
+pub struct LeaseCreateResult {
+    pub job_id: String,
+    pub message: String,
+}
+
+/// Create a lease, returning result for TUI (no printing)
+pub async fn create_lease_quiet(args: CreateLeaseArgs) -> Result<LeaseCreateResult> {
     // 1. Check if sbatch is available
     if Command::new("sbatch").arg("--version").output().is_err() {
         return Err(anyhow::anyhow!("'sbatch' not found. Cannot create Slurm lease on this machine."));
     }
 
     // 2. Generate Keeper Script
-    // Use `leaseq run` subcommand (same binary)
     let leaseq_bin = std::env::current_exe()?;
     let runner_cmd = format!("{} run", leaseq_bin.to_string_lossy());
 
@@ -91,21 +97,86 @@ pub async fn create_lease(args: CreateLeaseArgs) -> Result<()> {
     }
     script.push_str("#SBATCH --job-name=leaseq\n");
     script.push_str("#SBATCH --output=leaseq-%j.log\n");
-    
+
     for arg in &args.sbatch_arg {
         script.push_str(&format!("#SBATCH {}\n", arg));
     }
 
     script.push('\n');
     script.push_str("echo \"Starting leaseq runner on $SLURM_JOB_ID\"\n");
-    // srun launches runner on all nodes
     script.push_str(&format!("srun {} --lease $SLURM_JOB_ID --node $(hostname)\n", runner_cmd));
-    script.push_str("sleep 30\n"); // Grace period
+    script.push_str("sleep 30\n");
 
     // 3. Write to temp file
     let mut temp = NamedTempFile::new()?;
     temp.write_all(script.as_bytes())?;
-    
+
+    // 4. Submit
+    let output = Command::new("sbatch")
+        .arg("--parsable")
+        .arg(temp.path())
+        .output()
+        .context("Failed to execute sbatch")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow::anyhow!("sbatch failed: {}", stderr));
+    }
+
+    let job_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    // Don't wait in TUI mode - just return immediately
+    Ok(LeaseCreateResult {
+        job_id: job_id.clone(),
+        message: format!("Submitted Slurm job: {}", job_id),
+    })
+}
+
+/// Create a lease with CLI output (for non-TUI usage)
+pub async fn create_lease(args: CreateLeaseArgs) -> Result<()> {
+    // 1. Check if sbatch is available
+    if Command::new("sbatch").arg("--version").output().is_err() {
+        return Err(anyhow::anyhow!("'sbatch' not found. Cannot create Slurm lease on this machine."));
+    }
+
+    // 2. Generate Keeper Script
+    let leaseq_bin = std::env::current_exe()?;
+    let runner_cmd = format!("{} run", leaseq_bin.to_string_lossy());
+
+    let mut script = String::new();
+    script.push_str("#!/bin/bash\n");
+    script.push_str(&format!("#SBATCH --nodes={}\n", args.nodes));
+    if let Some(t) = &args.time {
+        script.push_str(&format!("#SBATCH --time={}\n", t));
+    }
+    if let Some(p) = &args.partition {
+        script.push_str(&format!("#SBATCH --partition={}\n", p));
+    }
+    if let Some(q) = &args.qos {
+        script.push_str(&format!("#SBATCH --qos={}\n", q));
+    }
+    if let Some(a) = &args.account {
+        script.push_str(&format!("#SBATCH --account={}\n", a));
+    }
+    if args.gpus_per_node > 0 {
+        script.push_str(&format!("#SBATCH --gpus-per-node={}\n", args.gpus_per_node));
+    }
+    script.push_str("#SBATCH --job-name=leaseq\n");
+    script.push_str("#SBATCH --output=leaseq-%j.log\n");
+
+    for arg in &args.sbatch_arg {
+        script.push_str(&format!("#SBATCH {}\n", arg));
+    }
+
+    script.push('\n');
+    script.push_str("echo \"Starting leaseq runner on $SLURM_JOB_ID\"\n");
+    script.push_str(&format!("srun {} --lease $SLURM_JOB_ID --node $(hostname)\n", runner_cmd));
+    script.push_str("sleep 30\n");
+
+    // 3. Write to temp file
+    let mut temp = NamedTempFile::new()?;
+    temp.write_all(script.as_bytes())?;
+
     // 4. Submit
     let output = Command::new("sbatch")
         .arg("--parsable")

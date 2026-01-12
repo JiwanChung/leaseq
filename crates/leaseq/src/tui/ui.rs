@@ -290,19 +290,27 @@ fn draw_logs(f: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
-    let text = if app.logs_state.maximized {
-        if app.logs_state.auto_follow {
-            "Enter/z:Minimize | f:Static | e:Stderr | g:Top | Backspace:Tasks | q:Quit | ?:Help"
-        } else {
-            "Enter/z:Minimize | f:Follow | e:Stderr | j/k:Scroll | ^u/d:Page | g/G:Jump | q:Quit"
-        }
+    // Show status message if present, otherwise show help
+    if let Some((msg, _)) = &app.status_message {
+        let p = Paragraph::new(msg.as_str())
+            .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+            .alignment(Alignment::Center);
+        f.render_widget(p, area);
     } else {
-        "h/j/k/l:Nav | Enter:Select | z:Zoom | F:Filter | a:Add | n:Lease | e:Stderr | q:Quit | ?:Help"
-    };
-    let p = Paragraph::new(text)
-        .style(Style::default().fg(Color::DarkGray))
-        .alignment(Alignment::Center);
-    f.render_widget(p, area);
+        let text = if app.logs_state.maximized {
+            if app.logs_state.auto_follow {
+                "Enter/z:Minimize | f:Static | e:Stderr | g:Top | Backspace:Tasks | q:Quit | ?:Help"
+            } else {
+                "Enter/z:Minimize | f:Follow | e:Stderr | j/k:Scroll | ^u/d:Page | g/G:Jump | q:Quit"
+            }
+        } else {
+            "h/j/k/l:Nav | Enter:Select | z:Zoom | F:Filter | a:Add | n:Lease | e:Stderr | q:Quit | ?:Help"
+        };
+        let p = Paragraph::new(text)
+            .style(Style::default().fg(Color::DarkGray))
+            .alignment(Alignment::Center);
+        f.render_widget(p, area);
+    }
 }
 
 fn draw_add_task_popup(f: &mut Frame, app: &App) {

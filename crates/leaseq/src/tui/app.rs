@@ -41,6 +41,9 @@ pub struct App<'a> {
 
     // Visible log height (set by UI)
     pub log_view_height: usize,
+
+    // Status message (shown temporarily)
+    pub status_message: Option<(String, std::time::Instant)>,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -213,6 +216,19 @@ impl<'a> App<'a> {
             node_modal: NodeModalState { selected: NodeModalAction::ViewStatus },
             filter_state: FilterState::default(),
             log_view_height: 10,
+            status_message: None,
+        }
+    }
+
+    pub fn set_status(&mut self, msg: String) {
+        self.status_message = Some((msg, std::time::Instant::now()));
+    }
+
+    pub fn clear_old_status(&mut self) {
+        if let Some((_, time)) = &self.status_message {
+            if time.elapsed() > std::time::Duration::from_secs(5) {
+                self.status_message = None;
+            }
         }
     }
 
@@ -351,6 +367,7 @@ impl<'a> App<'a> {
             if last_tick.elapsed() >= tick_rate {
                 self.refresh_data();
                 self.refresh_logs();
+                self.clear_old_status();
                 last_tick = Instant::now();
             }
         }
@@ -640,7 +657,6 @@ impl<'a> App<'a> {
                     let time = if time_str.trim().is_empty() { None } else { Some(time_str) };
                     let qos_str = self.lease_form.qos.lines().first().cloned().unwrap_or_default();
                     let qos = if qos_str.trim().is_empty() { None } else { Some(qos_str) };
-                    let wait = self.lease_form.wait.lines().first().cloned().unwrap_or_default().parse::<u64>().unwrap_or(30);
 
                     let args = lease::CreateLeaseArgs {
                         nodes,
@@ -650,16 +666,15 @@ impl<'a> App<'a> {
                         gpus_per_node: gpus,
                         account: None,
                         sbatch_arg: vec![],
-                        wait,
+                        wait: 0, // Don't wait in TUI mode
                     };
 
-                    match lease::create_lease(args).await {
-                        Ok(_) => {
-                            // TODO: Maybe switch to the new lease?
-                            // For now just stay here.
+                    match lease::create_lease_quiet(args).await {
+                        Ok(result) => {
+                            self.set_status(result.message);
                         },
-                        Err(_) => {
-                            // Ideally show error popup. For now just ignore.
+                        Err(e) => {
+                            self.set_status(format!("Error: {}", e));
                         }
                     }
                     self.mode = Mode::Normal;
