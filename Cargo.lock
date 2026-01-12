@@ -405,7 +405,7 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "leaseq"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -427,7 +427,7 @@ dependencies = [
 
 [[package]]
 name = "leaseq-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "directories",
  "hostname",
