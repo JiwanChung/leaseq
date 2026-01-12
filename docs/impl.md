@@ -35,19 +35,15 @@ This document specifies a Rust implementation strategy for **leaseq**:
 Rust workspace (recommended):
 
 ```
-
 leaseq/
 Cargo.toml
 crates/
 leaseq-core/        # protocol, state, fs ops, models
-leaseq-runner/      # runner binary logic (per-node, local or slurm)
-leaseq-cli/         # main binary: CLI + TUI + lease create/release
-
+leaseq/             # main binary: CLI + TUI + runner
 ```
 
-Binary names:
-- `leaseq` (main CLI + TUI)
-- `leaseq-runner` (runner executable invoked by local daemon or Slurm job script)
+Binary name:
+- `leaseq` (CLI, TUI, and runner via `leaseq run` subcommand)
 
 ---
 
@@ -266,7 +262,7 @@ Implementation:
 
 ---
 
-## 6) runner implementation (leaseq-runner)
+## 6) runner implementation (`leaseq run`)
 
 ### modes
 
@@ -350,7 +346,7 @@ Implementation:
 
 Fallback if systemd unavailable:
 
-* `leaseq daemon start` uses `nohup leaseq-runner ... &` and stores pid in runtime dir.
+* `leaseq daemon start` spawns `leaseq run --lease ...` in background and stores pid in runtime dir.
 
 ### local run dir
 
@@ -448,7 +444,7 @@ Periodic mirroring (simple):
    * writes `meta/lease.json`
    * launches one runner per node:
 
-     * `srun --nodes=$SLURM_JOB_NUM_NODES --ntasks=$SLURM_JOB_NUM_NODES leaseq-runner --lease $SLURM_JOB_ID --node $(hostname -s) --root <run_dir>`
+     * `srun --nodes=$SLURM_JOB_NUM_NODES --ntasks=$SLURM_JOB_NUM_NODES leaseq run --lease $SLURM_JOB_ID --node $(hostname -s) --root <run_dir>`
    * then `while true; do sleep 60; done`
 3. Submit with `sbatch` and parse returned jobid:
 

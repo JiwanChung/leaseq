@@ -67,17 +67,9 @@ pub async fn create_lease(args: CreateLeaseArgs) -> Result<()> {
     }
 
     // 2. Generate Keeper Script
-    // We need to find the path to `leaseq-runner`. 
-    // For now, assume it's in the same dir as the current executable or in PATH.
-    let runner_bin = std::env::current_exe()?
-        .parent().unwrap()
-        .join("leaseq-runner");
-        
-    let runner_cmd = if runner_bin.exists() {
-        runner_bin.to_string_lossy().to_string()
-    } else {
-        "leaseq-runner".to_string()
-    };
+    // Use `leaseq run` subcommand (same binary)
+    let leaseq_bin = std::env::current_exe()?;
+    let runner_cmd = format!("{} run", leaseq_bin.to_string_lossy());
 
     let mut script = String::new();
     script.push_str("#!/bin/bash\n");
