@@ -389,24 +389,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "leaseq-runner"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "hostname",
- "leaseq-core",
- "serde",
- "serde_json",
- "tempfile",
- "time",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
 name = "libc"
 version = "0.2.180"
 source = "registry+https://github.com/rust-lang/crates.io-index"

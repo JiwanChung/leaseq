@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use anyhow::Result;
+use std::path::PathBuf;
 
 mod commands;
 mod tui;
@@ -98,6 +99,20 @@ enum Commands {
     /// Manage leases
     #[command(subcommand)]
     Lease(commands::lease::LeaseCommands),
+    /// Run the task runner (used internally by daemon)
+    Run {
+        /// Lease ID (e.g., local:myhost or slurm jobid)
+        #[arg(long)]
+        lease: String,
+
+        /// Node name (defaults to hostname)
+        #[arg(long)]
+        node: Option<String>,
+
+        /// Root directory for execution (overrides default lookup)
+        #[arg(long)]
+        root: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -143,6 +158,10 @@ async fn main() -> Result<()> {
         }
         Some(Commands::Lease(cmd)) => {
             commands::lease::run(cmd).await
+        }
+        Some(Commands::Run { lease, node, root }) => {
+            tracing_subscriber::fmt::init();
+            commands::run::run(commands::run::RunArgs { lease, node, root }).await
         }
         None => {
             // Default to TUI

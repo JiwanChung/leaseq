@@ -41,16 +41,25 @@ Just atomic file renames on a shared filesystem.
 
 ## Installation
 
+### From crates.io (coming soon)
+
+```bash
+cargo install leaseq
+```
+
+### From GitHub
+
+```bash
+cargo install --git https://github.com/JiwanChung/leaseq.git
+```
+
 ### From source
 
 ```bash
 git clone https://github.com/JiwanChung/leaseq.git
 cd leaseq
 cargo build --release
-
-# Add to PATH
 cp target/release/leaseq ~/.local/bin/
-cp target/release/leaseq-runner ~/.local/bin/
 ```
 
 ### Requirements
@@ -203,8 +212,7 @@ leaseq lease ls                                       # List leases
 leaseq/
 ├── crates/
 │   ├── leaseq-core/     # Shared models, filesystem utilities
-│   ├── leaseq-runner/   # Task execution daemon
-│   └── leaseq/          # CLI and TUI
+│   └── leaseq/          # CLI, TUI, and task runner
 └── docs/
     ├── design.md        # Architecture decisions
     └── impl.md          # Implementation notes

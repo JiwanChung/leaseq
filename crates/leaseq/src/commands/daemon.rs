@@ -27,13 +27,14 @@ pub async fn start() -> Result<()> {
     // Ensure directories exist
     fs::create_dir_all(&root)?;
 
-    // Find the runner binary
-    let runner_bin = find_runner_binary()?;
+    // Use current executable with `run` subcommand
+    let current_exe = std::env::current_exe().context("Failed to get current executable")?;
 
     // Start the runner
     let log = fs::File::create(log_file())?;
 
-    let child = Command::new(&runner_bin)
+    let child = Command::new(&current_exe)
+        .arg("run")
         .arg("--lease")
         .arg(&lease_id)
         .stdout(Stdio::from(log.try_clone()?))
@@ -154,26 +155,3 @@ fn is_process_running(pid: u32) -> bool {
     }
 }
 
-fn find_runner_binary() -> Result<PathBuf> {
-    // Check next to current exe
-    if let Ok(exe) = std::env::current_exe() {
-        let runner = exe.parent().unwrap().join("leaseq-runner");
-        if runner.exists() {
-            return Ok(runner);
-        }
-    }
-
-    // Check in PATH
-    if let Ok(output) = Command::new("which").arg("leaseq-runner").output() {
-        if output.status.success() {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path.is_empty() {
-                return Ok(PathBuf::from(path));
-            }
-        }
-    }
-
-    Err(anyhow::anyhow!(
-        "leaseq-runner not found. Build it with 'cargo build -p leaseq-runner'"
-    ))
-}

@@ -4,5 +4,6 @@ pub mod daemon;
 pub mod follow;
 pub mod lease;
 pub mod logs;
+pub mod run;
 pub mod status;
 pub mod tasks;
