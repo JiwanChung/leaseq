@@ -282,10 +282,16 @@ bash -lc '
 * runner writes `ack/<task>.ack.json` on claim
 * CLI may retry if ack not seen
 
+### assignment liveness
+
+* `add` command checks heartbeat timestamp before assigning
+* Rejects nodes with stale heartbeats (>120s) to prevent black-holing tasks
+
 ### heartbeats
 
-* `hb/<node>.json` updated every ~10s
-* stale (>60s) = runner unhealthy
+* `hb/<node>.json` updated every 5s via a **background thread**
+* Ensures liveness even during blocking task execution
+* stale (>120s) = runner unhealthy / dead
 
 ---
 
@@ -412,7 +418,8 @@ Exact args stored in `meta/lease.json`.
 
 * other nodes unaffected
 * logs preserved
-* heartbeat marks failure
+* **Zombie Recovery**: On restart, runner scans `claimed/`, moves any found tasks back to `inbox/` for safe retry.
+* heartbeat marks failure (stale timestamp)
 
 ---
 

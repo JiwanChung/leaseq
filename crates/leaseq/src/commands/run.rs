@@ -2,7 +2,9 @@ use anyhow::{Context, Result};
 use leaseq_core::{config, fs as lfs, models};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
 pub struct RunArgs {
@@ -38,22 +40,53 @@ pub async fn run(args: RunArgs) -> Result<()> {
     }
     lfs::ensure_dir(root.join("logs"))?;
 
-    let mut runner = Runner {
-        _lease_id: args.lease,
-        node,
-        root,
-        executed_keys: HashSet::new(),
+    let executed_keys = Arc::new(Mutex::new(HashSet::new()));
+    let runner = Runner {
+        _lease_id: args.lease.clone(),
+        node: node.clone(),
+        root: root.clone(),
+        executed_keys: executed_keys.clone(),
     };
 
-    runner.load_executed_keys()?;
-    runner.run_loop().await
+    // 1. Recover Zombies (Self-Healing)
+    if let Err(e) = runner.recover_zombies().await {
+        error!("Failed to recover zombie tasks: {}", e);
+    }
+
+    runner.load_executed_keys().await?;
+
+    // 2. Start Background Heartbeat
+    // Ensure initial heartbeat exists
+    if let Err(e) = runner.update_heartbeat(None).await {
+        warn!("Failed to write initial heartbeat: {}", e);
+    }
+
+    let hb_runner = runner.clone();
+    // Shared state for current task ID
+    let current_task = Arc::new(Mutex::new(None::<String>));
+    let hb_current_task = current_task.clone();
+
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(5)); // Send HB every 5s
+        loop {
+            interval.tick().await;
+            let task_id = hb_current_task.lock().await.clone();
+            if let Err(e) = hb_runner.update_heartbeat(task_id.as_deref()).await {
+                error!("Heartbeat failed: {}", e);
+            }
+        }
+    });
+
+    // 3. Main Loop
+    runner.run_loop(current_task).await
 }
 
+#[derive(Clone)]
 struct Runner {
     _lease_id: String,
     node: String,
     root: PathBuf,
-    executed_keys: HashSet<String>,
+    executed_keys: Arc<Mutex<HashSet<String>>>,
 }
 
 #[derive(serde::Deserialize)]
@@ -63,80 +96,89 @@ struct CancelCommand {
 }
 
 impl Runner {
-    fn load_executed_keys(&mut self) -> Result<()> {
+    async fn load_executed_keys(&self) -> Result<()> {
         let done_dir = self.root.join("done").join(&self.node);
         if !done_dir.exists() {
             return Ok(());
         }
 
-        for entry in std::fs::read_dir(&done_dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.extension().map(|e| e == "json").unwrap_or(false)
-                && path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().ends_with(".result.json"))
-                    .unwrap_or(false)
-            {
-                if let Ok(result) = lfs::read_json::<models::TaskResult, _>(&path) {
-                    self.executed_keys.insert(result.idempotency_key);
-                }
-            }
-        }
-
-        info!(
-            "Loaded {} executed keys from done directory",
-            self.executed_keys.len()
-        );
-        Ok(())
-    }
-
-    fn is_duplicate(&self, idempotency_key: &str) -> bool {
-        self.executed_keys.contains(idempotency_key)
-    }
-
-    #[allow(dead_code)]
-    fn check_cancel(&self, task_id: &str) -> bool {
-        let control_dir = self.root.join("control").join(&self.node);
-        if !control_dir.exists() {
-            return false;
-        }
-
-        if let Ok(entries) = std::fs::read_dir(&control_dir) {
-            for entry in entries.flatten() {
+        let mut keys = self.executed_keys.lock().await;
+        // Optimization: In a real large system, we might not want to read ALL done files.
+        // But for deduplication, we need them.
+        // We could limit to last N hours or use a separate index.
+        // For now, keep existing logic but wrapped in Mutex.
+        
+        let mut count = 0;
+        if let Ok(entries) = std::fs::read_dir(&done_dir) {
+            for entry in entries {
+                let entry = entry?;
                 let path = entry.path();
-                if path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().starts_with("cancel_"))
-                    .unwrap_or(false)
+                if path.extension().map(|e| e == "json").unwrap_or(false)
+                    && path.file_name().map(|n| n.to_string_lossy().ends_with(".result.json")).unwrap_or(false)
                 {
-                    if let Ok(cmd) = lfs::read_json::<CancelCommand, _>(&path) {
-                        if cmd.task_id == task_id || task_id.starts_with(&cmd.task_id) {
-                            let _ = std::fs::remove_file(&path);
-                            return true;
-                        }
+                    if let Ok(result) = lfs::read_json::<models::TaskResult, _>(&path) {
+                        keys.insert(result.idempotency_key);
+                        count += 1;
                     }
                 }
             }
         }
-        false
+
+        info!("Loaded {} executed keys from done directory", count);
+        Ok(())
     }
 
-    async fn run_loop(&mut self) -> Result<()> {
+    async fn recover_zombies(&self) -> Result<()> {
+        let claimed_dir = self.root.join("claimed").join(&self.node);
+        let inbox_dir = self.root.join("inbox").join(&self.node);
+        
+        if !claimed_dir.exists() {
+            return Ok(());
+        }
+
+        for entry in std::fs::read_dir(&claimed_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_file() {
+                let filename = path.file_name().unwrap();
+                info!("Found zombie task {:?}. Recovering to inbox...", filename);
+                
+                // Move back to inbox
+                // Note: This puts it at the "end" of the queue conceptually if we sorted by mtime,
+                // but our sort is by filename (lexicographical), so it will jump back to its 
+                // correct priority position! (Because filename contains timestamp prefix).
+                let new_path = inbox_dir.join(filename);
+                std::fs::rename(&path, &new_path)?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn is_duplicate(&self, idempotency_key: &str) -> bool {
+        self.executed_keys.lock().await.contains(idempotency_key)
+    }
+
+    async fn run_loop(&self, current_task: Arc<Mutex<Option<String>>>) -> Result<()> {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
 
         loop {
             interval.tick().await;
 
-            if let Err(e) = self.update_heartbeat(None).await {
-                error!("Heartbeat failed: {}", e);
-            }
+            // We don't manually update heartbeat here anymore (background task does it)
 
             match self.poll_and_claim().await {
                 Ok(Some(task_path)) => {
+                    // Update current task for heartbeat
+                    if let Ok(spec) = lfs::read_json::<models::TaskSpec, _>(&task_path) {
+                        *current_task.lock().await = Some(spec.task_id.clone());
+                    }
+
                     if let Err(e) = self.execute_task(&task_path).await {
                         error!("Task execution failed: {}", e);
                     }
+                    
+                    // Clear current task
+                    *current_task.lock().await = None;
                 }
                 Ok(None) => {}
                 Err(e) => {
@@ -148,23 +190,28 @@ impl Runner {
 
     async fn update_heartbeat(&self, running_task: Option<&str>) -> Result<()> {
         let hb_path = self.root.join("hb").join(format!("{}.json", self.node));
-        lfs::ensure_dir(hb_path.parent().unwrap())?;
+        // lfs::ensure_dir(hb_path.parent().unwrap())?; // Done at init
 
         let hb = models::Heartbeat {
             node: self.node.clone(),
             ts: time::OffsetDateTime::now_utc(),
             running_task_id: running_task.map(|s| s.to_string()),
-            pending_estimate: 0,
+            pending_estimate: 0, // TODO: calculate
             runner_pid: std::process::id(),
             version: env!("CARGO_PKG_VERSION").to_string(),
         };
 
-        lfs::atomic_write_json(&hb_path, &hb)?;
+        // Suppress error if write fails (don't crash background thread)
+        if let Err(e) = lfs::atomic_write_json(&hb_path, &hb) {
+            warn!("Failed to write heartbeat: {}", e);
+        }
         Ok(())
     }
 
     async fn poll_and_claim(&self) -> Result<Option<PathBuf>> {
         let inbox_dir = self.root.join("inbox").join(&self.node);
+        // Optimization: Don't read whole dir if not needed? 
+        // For now, keep list_files_sorted to maintain FIFO
         let entries = lfs::list_files_sorted(&inbox_dir)?;
 
         if let Some(task_file) = entries.first() {
@@ -188,13 +235,13 @@ impl Runner {
         Ok(None)
     }
 
-    async fn execute_task(&mut self, task_path: &Path) -> Result<()> {
+    async fn execute_task(&self, task_path: &Path) -> Result<()> {
         let spec: models::TaskSpec = lfs::read_json(task_path)?;
         info!("Executing task {} ({})", spec.task_id, spec.command);
 
         let done_dir = self.root.join("done").join(&self.node);
 
-        if self.is_duplicate(&spec.idempotency_key) {
+        if self.is_duplicate(&spec.idempotency_key).await {
             warn!(
                 "Skipping duplicate task {} (key={})",
                 spec.task_id, spec.idempotency_key
@@ -225,7 +272,7 @@ impl Runner {
             return Ok(());
         }
 
-        self.update_heartbeat(Some(&spec.task_id)).await?;
+        // Heartbeat is handled by background task now
 
         let stdout_path = self.root.join("logs").join(format!("{}.out", spec.task_id));
         let stderr_path = self.root.join("logs").join(format!("{}.err", spec.task_id));
@@ -234,6 +281,14 @@ impl Runner {
         let stderr_file = std::fs::File::create(&stderr_path)?;
 
         let start_time = time::OffsetDateTime::now_utc();
+
+        // Use spawn_blocking or just await process. 
+        // tokio::process::Command is async, so it doesn't block the thread, 
+        // but it does "block" the task. Since we are in `execute_task` which is awaited by `run_loop`,
+        // `run_loop` is suspended. 
+        // BUT, we spawned the heartbeat loop separately using `tokio::spawn`.
+        // So the heartbeat loop WILL continue to run while `run_loop` is suspended here.
+        // This fixes the heartbeat gap!
 
         let status = tokio::process::Command::new("bash")
             .arg("-lc")
@@ -278,7 +333,7 @@ impl Runner {
             gpus_assigned,
         };
 
-        self.executed_keys.insert(spec.idempotency_key.clone());
+        self.executed_keys.lock().await.insert(spec.idempotency_key.clone());
 
         let original_name = task_path.file_name().unwrap().to_string_lossy();
         let result_name = if original_name.ends_with(".json") {
@@ -292,8 +347,6 @@ impl Runner {
 
         let archived_task_path = done_dir.join(task_path.file_name().unwrap());
         std::fs::rename(task_path, &archived_task_path)?;
-
-        self.update_heartbeat(None).await?;
 
         Ok(())
     }
@@ -333,11 +386,12 @@ mod tests {
         };
         lfs::atomic_write_json(&task_file, &spec)?;
 
+        let executed_keys = std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashSet::new()));
         let runner = Runner {
             _lease_id: "test-lease".to_string(),
             node: node.clone(),
             root: root.clone(),
-            executed_keys: HashSet::new(),
+            executed_keys,
         };
 
         let claimed_path = runner.poll_and_claim().await?.expect("Should claim task");

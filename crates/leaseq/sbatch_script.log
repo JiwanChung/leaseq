@@ -1,0 +1,36 @@
+#!/bin/bash
+#SBATCH --nodes=2
+#SBATCH --time=01:00:00
+#SBATCH --partition=debug
+#SBATCH --gpus-per-node=4
+#SBATCH --job-name=leaseq
+#SBATCH --output=leaseq-%j.log
+#SBATCH --exclusive
+
+echo "Starting leaseq runner on $SLURM_JOB_ID"
+srun /Users/jiwan/projects/leaseq/target/debug/deps/slurm_integration_test-4fffae7956f9fd93 run --lease $SLURM_JOB_ID --node $(hostname)
+sleep 30
+#!/bin/bash
+#SBATCH --nodes=2
+#SBATCH --time=01:00:00
+#SBATCH --partition=debug
+#SBATCH --gpus-per-node=4
+#SBATCH --job-name=leaseq
+#SBATCH --output=leaseq-%j.log
+#SBATCH --exclusive
+
+echo "Starting leaseq runner on $SLURM_JOB_ID"
+srun /Users/jiwan/projects/leaseq/target/debug/deps/slurm_integration_test-4fffae7956f9fd93 run --lease $SLURM_JOB_ID --node $(hostname)
+sleep 30
+#!/bin/bash
+#SBATCH --nodes=2
+#SBATCH --time=01:00:00
+#SBATCH --partition=debug
+#SBATCH --gpus-per-node=4
+#SBATCH --job-name=leaseq
+#SBATCH --output=leaseq-%j.log
+#SBATCH --exclusive
+
+echo "Starting leaseq runner on $SLURM_JOB_ID"
+srun /Users/jiwan/projects/leaseq/target/debug/deps/slurm_integration_test-4fffae7956f9fd93 run --lease $SLURM_JOB_ID --node $(hostname)
+sleep 30

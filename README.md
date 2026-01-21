@@ -117,7 +117,7 @@ The terminal UI provides real-time monitoring of your tasks:
 ├──────────────────┼────────────────────────────────┼─────────────────────────┤
 │ gpu-node-01 [OK] │ T03a11e8 RUNNING G4 gpu-node-01│ ID: T03a11e81           │
 │ gpu-node-02 [OK] │ T69f9065 RUNNING G2 gpu-node-02│ State: RUNNING          │
-│ gpu-node-03 [OK] │ T9c55996 PENDING G1 gpu-node-01│ Node: gpu-node-01       │
+│ gpu-node-03 [STALE] │ T9c55996 STUCK   G1 gpu-node-03│ Node: gpu-node-03       │
 │                  │ Te8c767a FAILED  G2 gpu-node-03│ GPUs: 4 [0,1,2,3]       │
 │                  │ T04fa34d DONE    G1 gpu-node-02│ Exit: -                 │
 │                  │                                │                         │
@@ -130,17 +130,23 @@ The terminal UI provides real-time monitoring of your tasks:
 │ [2024-01-09 10:01:00] Epoch 1 - Batch 100/5005 - Loss: 6.234                │
 │ [2024-01-09 10:02:00] Epoch 1 - Batch 200/5005 - Loss: 5.891                │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│ h/j/k/l:Nav | Enter:Select | z:Zoom | F:Filter | a:Add | q:Quit | ?:Help   │
+│ h/j/k/l:Nav | Enter:Actions | z:Zoom | F:Filter | a:Add | q:Quit | ?:Help   │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+### TUI Features
+
+- **Visual Health**: Stale nodes and stuck tasks are highlighted
+- **Task Actions**: Press `Enter` on a task to View Logs, **Recover to Inbox**, or Cancel
+- **Filters**: Quickly filter by Running, Pending, Done, Failed, or **Stuck**
 
 ### TUI Keybindings
 
 | Key | Action |
 |-----|--------|
 | `h/j/k/l` | Navigate panes and lists |
-| `Enter` | Select task / toggle zoom |
-| `F` | Cycle filter (Recent/All/Running/Pending/Done/Failed) |
+| `Enter` | **Task Actions** / toggle zoom |
+| `F` | Cycle filter (Recent/All/Running/Pending/Done/Failed/**Stuck**) |
 | `z` | Maximize logs pane |
 | `f` | Toggle follow mode (in zoomed logs) |
 | `e` | Toggle stdout/stderr |
@@ -153,7 +159,7 @@ The terminal UI provides real-time monitoring of your tasks:
 ```bash
 leaseq add [--lease ID] [--node NAME] -- <COMMAND>   # Add a task
 leaseq status                                         # Show queue status
-leaseq tasks [--state STATE]                         # List tasks
+leaseq tasks [--state STATE]                         # List tasks (states: pending, running, done, failed, stuck)
 leaseq logs <TASK_ID>                                # Show task logs
 leaseq follow <TASK_ID>                              # Follow logs in real-time
 leaseq cancel <TASK_ID>                              # Cancel a task

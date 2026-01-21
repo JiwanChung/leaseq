@@ -1,9 +1,8 @@
 use clap::{Parser, Subcommand};
 use anyhow::Result;
 use std::path::PathBuf;
-
-mod commands;
-mod tui;
+use leaseq::commands;
+use leaseq::tui;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]

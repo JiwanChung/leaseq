@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::tui::app::{App, Focus, Mode, NodeModalAction};
+use crate::tui::app::{App, Focus, Mode, NodeModalAction, TaskModalAction};
 
 fn truncate_str(s: &str, max_len: usize) -> String {
     if s.len() > max_len {
@@ -72,6 +72,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if app.mode == Mode::NodeDetails {
         draw_node_details_popup(f, app);
     }
+    
+    if app.mode == Mode::TaskActions {
+        draw_task_actions_popup(f, app);
+    }
 
     if app.mode == Mode::Help {
         draw_help_popup(f);
@@ -133,6 +137,7 @@ fn draw_tasks(f: &mut Frame, app: &App, area: Rect) {
                 "PENDING" => Color::Yellow,
                 "DONE" => Color::Blue,
                 "FAILED" => Color::Red,
+                "STUCK" => Color::Magenta, // Visual distinction for STUCK
                 _ => Color::White,
             };
 
@@ -192,6 +197,7 @@ fn draw_task_detail(f: &mut Frame, app: &App, area: Rect) {
             "PENDING" => Color::Yellow,
             "DONE" => Color::Blue,
             "FAILED" => Color::Red,
+            "STUCK" => Color::Magenta,
             _ => Color::White,
         };
 
@@ -427,6 +433,63 @@ fn draw_node_details_popup(f: &mut Frame, app: &App) {
     }
 }
 
+fn draw_task_actions_popup(f: &mut Frame, app: &App) {
+    let area = centered_rect(50, 40, f.area());
+    f.render_widget(Clear, area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Task Actions (j/k to select, Enter to confirm) ")
+        .style(Style::default().fg(Color::Cyan));
+
+    f.render_widget(block.clone(), area);
+
+    let inner = block.inner(area);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .margin(1)
+        .constraints([
+            Constraint::Length(3), // Info
+            Constraint::Length(1), // Spacer
+            Constraint::Length(1), // Opt 1
+            Constraint::Length(1), // Opt 2
+            Constraint::Length(1), // Opt 3
+        ])
+        .split(inner);
+
+    // Info
+    if let Some(task) = app.selected_task() {
+        let info = Line::from(vec![
+            Span::raw("Task: "),
+            Span::styled(&task.id, Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw("  State: "),
+            Span::raw(&task.state),
+        ]);
+        f.render_widget(Paragraph::new(info), chunks[0]);
+    }
+
+    let options = [
+        ("View Logs", TaskModalAction::ViewLogs),
+        ("Recover to Inbox", TaskModalAction::RecoverToInbox),
+        ("Cancel Task", TaskModalAction::CancelTask),
+    ];
+
+    for (i, (label, action)) in options.iter().enumerate() {
+        let is_selected = app.task_modal.selected == *action;
+        let style = if is_selected {
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        };
+        let prefix = if is_selected { "> " } else { "  " };
+        let text = format!("{}{}", prefix, label);
+        f.render_widget(
+            Paragraph::new(text).style(style),
+            chunks[2 + i],
+        );
+    }
+}
+
 fn draw_help_popup(f: &mut Frame) {
     let area = centered_rect(60, 80, f.area());
     let block = Block::default().borders(Borders::ALL).title(" Help ").style(Style::default().bg(Color::Blue));
@@ -439,7 +502,7 @@ fn draw_help_popup(f: &mut Frame) {
         "",
         "Actions:",
         "  Enter    Nodes: open details",
-        "           Tasks: view logs & focus Logs pane",
+        "           Tasks: open task actions (Logs/Recover/Cancel)",
         "           Logs: toggle zoom (maximize/minimize)",
         "  a        Add Task (opens input)",
         "  n        New Slurm Lease (opens form)",
@@ -449,6 +512,7 @@ fn draw_help_popup(f: &mut Frame) {
         "  Recent   All active + recent completed (default)",
         "  All      Show all tasks",
         "  Running  Only running tasks",
+        "  Stuck    Only stuck/unresponsive tasks",
         "  Pending  Only pending tasks",
         "  Done     Only successful tasks",
         "  Failed   Only failed tasks",

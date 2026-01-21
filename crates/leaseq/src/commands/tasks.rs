@@ -1,5 +1,6 @@
 use anyhow::Result;
 use leaseq_core::{config, fs as lfs, models};
+use std::collections::HashMap;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum TaskStateFilter {
@@ -8,6 +9,7 @@ pub enum TaskStateFilter {
     Running,
     Done,
     Failed,
+    Stuck,
 }
 
 impl TaskStateFilter {
@@ -18,6 +20,7 @@ impl TaskStateFilter {
             "running" => Some(Self::Running),
             "done" | "finished" => Some(Self::Done),
             "failed" => Some(Self::Failed),
+            "stuck" | "unresponsive" => Some(Self::Stuck),
             _ => None,
         }
     }
@@ -42,6 +45,20 @@ pub async fn run(
         .and_then(|s| TaskStateFilter::from_str(s))
         .unwrap_or(TaskStateFilter::All);
 
+    // Load heartbeats to check node liveness
+    let mut node_status = HashMap::new();
+    let hb_dir = root.join("hb");
+    let now = time::OffsetDateTime::now_utc();
+    if hb_dir.exists() {
+        for f in lfs::list_files_sorted(&hb_dir).unwrap_or_default() {
+            if let Ok(hb) = lfs::read_json::<models::Heartbeat, _>(&f) {
+                // If HB is older than 2 mins (same threshold as add.rs), consider stale
+                let is_alive = (now - hb.ts).as_seconds_f64() < 120.0;
+                node_status.insert(hb.node, is_alive);
+            }
+        }
+    }
+
     println!("Lease: {}", lease_id);
     println!("{:<10} {:<10} {:<12} COMMAND", "TASK", "STATE", "NODE");
     println!("{}", "-".repeat(60));
@@ -49,8 +66,11 @@ pub async fn run(
     // Collect and display tasks
     let mut task_count = 0;
 
-    // Running tasks (claimed)
-    if state_filter == TaskStateFilter::All || state_filter == TaskStateFilter::Running {
+    // Running (or Stuck) tasks (claimed)
+    if state_filter == TaskStateFilter::All 
+        || state_filter == TaskStateFilter::Running 
+        || state_filter == TaskStateFilter::Stuck 
+    {
         let claimed_dir = root.join("claimed");
         if claimed_dir.exists() {
             for entry in std::fs::read_dir(&claimed_dir)? {
@@ -64,6 +84,19 @@ pub async fn run(
                         }
                     }
 
+                    // Check liveness
+                    // If no heartbeat found, assume dead/stuck (safe default)
+                    let is_alive = *node_status.get(&node_name).unwrap_or(&false);
+                    let display_state = if is_alive { "RUNNING" } else { "STUCK" };
+
+                    // Apply filter
+                    if state_filter == TaskStateFilter::Running && !is_alive {
+                        continue;
+                    }
+                    if state_filter == TaskStateFilter::Stuck && is_alive {
+                        continue;
+                    }
+
                     for task_file in lfs::list_files_sorted(entry.path())? {
                         if let Ok(spec) = lfs::read_json::<models::TaskSpec, _>(&task_file) {
                             if let Some(ref s) = search {
@@ -74,7 +107,7 @@ pub async fn run(
                             println!(
                                 "{:<10} {:<10} {:<12} {}",
                                 spec.task_id,
-                                "RUNNING",
+                                display_state,
                                 node_name,
                                 truncate(&spec.command, 40)
                             );

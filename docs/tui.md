@@ -131,16 +131,21 @@ Task state derived from directories:
 * Middle-right: task list
 * Bottom: log viewer (optional; collapsible)
 
-### screen 3: task details (modal)
+### screen 3: task details / actions (modal)
 
 Shows:
 
-* task id, node, state
+* task id, node, state (including **STUCK** status if node is unresponsive)
 * command, cwd, env (collapsed)
 * timestamps: created/claimed/finished
 * exit code (if any)
 * log paths
-* quick actions: follow stdout/stderr, open logs, copy command
+
+Actions (via Enter on task):
+
+* **View Logs**: Focus and follow logs
+* **Recover to Inbox**: Move stuck tasks from `claimed` back to `inbox` (for crash recovery)
+* **Cancel Task**: Cancel execution
 
 ### screen 4: slurm lease create (form)
 
@@ -177,78 +182,24 @@ Fields:
 
 ### nodes pane
 
-* `Enter`: filter task list to that node
+* `Enter`: open node details (View Status / Release Lease)
 * `s`: show node stats (hb age, running task, pending count)
 
 ### task list pane
 
-* `Enter`: open task details modal
-* `F`: follow (stdout) for selected task
-* `E`: follow stderr for selected task
-* `A`: follow both (stdout+stderr merged)
+* `Enter`: open **Task Actions** modal (Logs / Recover / Cancel)
+* `F`: cycle filter (Recent -> All -> Running -> Pending -> Done -> Failed -> **Stuck**)
 * `L`: open logs view (non-follow, paged)
-* `X`: cancel task (writes cancel command file; see below)
-* `R`: retry task (re-enqueue with same command; new idempotency key)
-* `1/2/3/4`: quick filters (pending/running/failed/finished)
+* `a`: add new task
 
 ### log viewer pane
 
-* `Space`: toggle follow (tail -f mode)
-* `PgUp/PgDn`: scroll
+* `Space`/`f`: toggle follow (tail -f mode)
+* `PgUp/PgDn` or `j/k` (zoomed): scroll
 * `g/G`: top/bottom
-* `o`: switch stdout↔stderr
-* `m`: merge/unmerge stdout+stderr
+* `e`: switch stdout↔stderr
+* `z` / `Enter`: toggle zoom/maximize
 * `esc`: collapse log pane
-
----
-
-## `follow` semantics in TUI
-
-`leaseq follow` CLI becomes:
-
-* `F` (follow stdout) in task list
-* If no task selected:
-
-  * if exactly one RUNNING task exists: follow it
-  * else open a selector listing RUNNING tasks
-
-In dashboard, a dedicated “Follow” action exists:
-
-* `f`: follow “current running” based on the same rule above.
-
----
-
-## task cancellation / control model (no RPC)
-
-Because runners poll FS, task control is file-based:
-
-### cancel
-
-UI writes:
-
-* `control/<node>/cancel_T014_<uuid>.json`
-
-Runner checks control inbox each loop and:
-
-* if T014 running: send SIGTERM, then SIGKILL after grace period
-* if pending: remove from inbox and mark CANCELLED result
-
-### retry
-
-UI writes a new task file (new seq and new idempotency key) with same command.
-
-### pause lane (node)
-
-UI writes:
-
-* `control/<node>/pause.json`
-  Runner stops claiming new tasks but allows current task to finish.
-
-### resume lane
-
-* `control/<node>/resume.json`
-
-(These are optional but very useful.)
 
 ---
 
@@ -256,14 +207,14 @@ UI writes:
 
 ### filters
 
-* by state: PENDING/RUNNING/FAILED/FINISHED/LOST?
+* by state: PENDING/RUNNING/FAILED/FINISHED/STUCK
 * by node
 * by substring match on command
 * by “has stderr output” (non-empty err file or exit != 0)
 
 ### sorting
 
-* default: state priority (RUNNING > PENDING > FAILED > FINISHED), then start time desc
+* default: state priority (RUNNING/STUCK > PENDING > FAILED > FINISHED), then start time desc
 * optional: by seq number within node lane
 
 ---

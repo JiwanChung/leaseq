@@ -10,6 +10,7 @@ use anyhow::Result;
 use leaseq_core::{config, fs as lfs, models};
 use tui_textarea::TextArea;
 use crate::commands::{add, lease};
+use std::collections::HashMap;
 
 use crate::tui::ui;
 
@@ -35,6 +36,9 @@ pub struct App<'a> {
 
     // Node Modal State
     pub node_modal: NodeModalState,
+    
+    // Task Action Modal State
+    pub task_modal: TaskModalState,
 
     // Filter State
     pub filter_state: FilterState,
@@ -59,6 +63,7 @@ pub enum Mode {
     InputAdd,
     CreateLease,
     NodeDetails,
+    TaskActions,
     Help,
 }
 
@@ -70,6 +75,17 @@ pub enum NodeModalAction {
 
 pub struct NodeModalState {
     pub selected: NodeModalAction,
+}
+
+#[derive(PartialEq, Clone, Copy)]
+pub enum TaskModalAction {
+    ViewLogs,
+    RecoverToInbox,
+    CancelTask,
+}
+
+pub struct TaskModalState {
+    pub selected: TaskModalAction,
 }
 
 pub struct LeaseFormState<'a> {
@@ -159,6 +175,7 @@ pub enum TaskFilter {
     Pending,
     Done,
     Failed,
+    Stuck,
     Recent, // Default: all active + recent completed
 }
 
@@ -176,6 +193,7 @@ impl std::fmt::Display for TaskFilter {
             TaskFilter::Pending => write!(f, "Pending"),
             TaskFilter::Done => write!(f, "Done"),
             TaskFilter::Failed => write!(f, "Failed"),
+            TaskFilter::Stuck => write!(f, "Stuck"),
             TaskFilter::Recent => write!(f, "Recent"),
         }
     }
@@ -214,6 +232,7 @@ impl<'a> App<'a> {
             lease_form: LeaseFormState::default(),
             logs_state: LogState::default(),
             node_modal: NodeModalState { selected: NodeModalAction::ViewStatus },
+            task_modal: TaskModalState { selected: TaskModalAction::ViewLogs },
             filter_state: FilterState::default(),
             log_view_height: 10,
             status_message: None,
@@ -243,7 +262,8 @@ impl<'a> App<'a> {
             TaskFilter::Running => TaskFilter::Pending,
             TaskFilter::Pending => TaskFilter::Done,
             TaskFilter::Done => TaskFilter::Failed,
-            TaskFilter::Failed => TaskFilter::Recent,
+            TaskFilter::Failed => TaskFilter::Stuck,
+            TaskFilter::Stuck => TaskFilter::Recent,
         };
         self.apply_filter();
     }
@@ -270,10 +290,14 @@ impl<'a> App<'a> {
                 .filter(|t| t.state == "FAILED")
                 .cloned()
                 .collect(),
+            TaskFilter::Stuck => self.all_tasks.iter()
+                .filter(|t| t.state == "STUCK")
+                .cloned()
+                .collect(),
             TaskFilter::Recent => {
-                // All running and pending
+                // All running, pending, and stuck
                 let mut filtered: Vec<TaskState> = self.all_tasks.iter()
-                    .filter(|t| t.state == "RUNNING" || t.state == "PENDING")
+                    .filter(|t| t.state == "RUNNING" || t.state == "PENDING" || t.state == "STUCK")
                     .cloned()
                     .collect();
 
@@ -354,6 +378,7 @@ impl<'a> App<'a> {
                     Mode::InputAdd => self.handle_input_add(event::read()?).await?,
                     Mode::CreateLease => self.handle_create_lease_input(event::read()?).await?,
                     Mode::NodeDetails => self.handle_node_details_input(event::read()?).await?,
+                    Mode::TaskActions => self.handle_task_actions_input(event::read()?).await?,
                     Mode::Help => {
                         if let Event::Key(key) = event::read()? {
                             if key.code == KeyCode::Esc || key.code == KeyCode::Char('q') {
@@ -513,15 +538,10 @@ impl<'a> App<'a> {
                             }
                         },
                         Focus::Tasks => {
-                            // Select task for log viewing and focus logs
+                            // Open Task Action Modal
                             if !self.tasks.is_empty() {
-                                let task = &self.tasks[self.selected_task_idx];
-                                self.logs_state.task_id = Some(task.id.clone());
-                                self.logs_state.file_pos = 0;
-                                self.logs_state.lines.clear();
-                                self.logs_state.auto_follow = true;
-                                self.refresh_logs();
-                                self.focus = Focus::Logs;
+                                self.task_modal.selected = TaskModalAction::ViewLogs;
+                                self.mode = Mode::TaskActions;
                             }
                         },
                         Focus::Logs => {
@@ -603,6 +623,83 @@ impl<'a> App<'a> {
                             }
                             self.mode = Mode::Normal;
                         },
+                    }
+                },
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_task_actions_input(&mut self, event: Event) -> Result<()> {
+        if let Event::Key(key) = event {
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    self.mode = Mode::Normal;
+                },
+                KeyCode::Up | KeyCode::Char('k') => {
+                    match self.task_modal.selected {
+                        TaskModalAction::ViewLogs => {},
+                        TaskModalAction::RecoverToInbox => self.task_modal.selected = TaskModalAction::ViewLogs,
+                        TaskModalAction::CancelTask => self.task_modal.selected = TaskModalAction::RecoverToInbox,
+                    }
+                },
+                KeyCode::Down | KeyCode::Char('j') => {
+                     match self.task_modal.selected {
+                        TaskModalAction::ViewLogs => self.task_modal.selected = TaskModalAction::RecoverToInbox,
+                        TaskModalAction::RecoverToInbox => self.task_modal.selected = TaskModalAction::CancelTask,
+                        TaskModalAction::CancelTask => {},
+                    }
+                },
+                KeyCode::Enter => {
+                    match self.task_modal.selected {
+                        TaskModalAction::ViewLogs => {
+                             if !self.tasks.is_empty() {
+                                let task = &self.tasks[self.selected_task_idx];
+                                self.logs_state.task_id = Some(task.id.clone());
+                                self.logs_state.file_pos = 0;
+                                self.logs_state.lines.clear();
+                                self.logs_state.auto_follow = true;
+                                self.refresh_logs();
+                                self.focus = Focus::Logs;
+                            }
+                            self.mode = Mode::Normal;
+                        },
+                        TaskModalAction::RecoverToInbox => {
+                             // Move file from claimed to inbox
+                             if !self.tasks.is_empty() {
+                                 let task = &self.tasks[self.selected_task_idx];
+                                 let root = if self.lease_id.starts_with("local:") {
+                                     config::runtime_dir().join(&self.lease_id)
+                                 } else {
+                                     config::leaseq_home_dir().join("runs").join(&self.lease_id)
+                                 };
+                                 
+                                 // We need to find the file in 'claimed'
+                                 let claimed_dir = root.join("claimed").join(&task.node);
+                                 let inbox_dir = root.join("inbox").join(&task.node);
+                                 
+                                 if let Ok(files) = lfs::list_files_sorted(&claimed_dir) {
+                                     for f in files {
+                                         if let Ok(spec) = lfs::read_json::<models::TaskSpec, _>(&f) {
+                                             if spec.task_id == task.id {
+                                                 let new_path = inbox_dir.join(f.file_name().unwrap());
+                                                 let _ = std::fs::rename(&f, &new_path);
+                                                 self.set_status(format!("Recovered task {} to inbox", task.id));
+                                                 break;
+                                             }
+                                         }
+                                     }
+                                 }
+                                 self.refresh_data();
+                             }
+                             self.mode = Mode::Normal;
+                        },
+                        TaskModalAction::CancelTask => {
+                             // Implementation: move to done/failed
+                             self.set_status("Cancel not fully implemented in TUI yet.".to_string());
+                             self.mode = Mode::Normal;
+                        }
                     }
                 },
                 _ => {}
@@ -694,14 +791,18 @@ impl<'a> App<'a> {
         }
         Ok(())
     }
-    
-    fn refresh_data(&mut self) {
+
+    // ... (handle_input_add, handle_create_lease_input unchanged)
+
+    pub fn refresh_data(&mut self) {
         let root = if self.lease_id.starts_with("local:") {
             config::runtime_dir().join(&self.lease_id)
         } else {
             config::leaseq_home_dir().join("runs").join(&self.lease_id)
         };
+        // eprintln!("DEBUG: Refreshing data for lease {} at root {:?}", self.lease_id, root);
         
+        let mut node_status = HashMap::new();
         // Nodes
         let mut new_nodes = Vec::new();
         let hb_dir = root.join("hb");
@@ -709,12 +810,14 @@ impl<'a> App<'a> {
             for f in files {
                 if let Ok(hb) = lfs::read_json::<models::Heartbeat, _>(&f) {
                     let age = (time::OffsetDateTime::now_utc() - hb.ts).as_seconds_f64();
-                    let status = if age > 60.0 { "STALE" } else { "OK" };
+                    let is_alive = age < 120.0;
+                    let status = if is_alive { "OK" } else { "STALE" };
                     new_nodes.push(NodeState {
-                        name: hb.node,
+                        name: hb.node.clone(),
                         status: status.to_string(),
                         last_seen: age,
                     });
+                    node_status.insert(hb.node, is_alive);
                 }
             }
         }
@@ -729,13 +832,15 @@ impl<'a> App<'a> {
                 for entry in entries.flatten() {
                     if entry.path().is_dir() {
                         let node_name = entry.file_name().to_string_lossy().into_owned();
+                        let is_alive = *node_status.get(&node_name).unwrap_or(&false);
+                        
                          if let Ok(files) = lfs::list_files_sorted(entry.path()) {
                             for f in files {
                                 if let Ok(spec) = lfs::read_json::<models::TaskSpec, _>(&f) {
                                     new_tasks.push(TaskState {
                                         id: spec.task_id,
                                         command: spec.command,
-                                        state: "RUNNING".to_string(),
+                                        state: if is_alive { "RUNNING".to_string() } else { "STUCK".to_string() },
                                         node: node_name.clone(),
                                         exit_code: None,
                                         gpus_requested: spec.gpus,
@@ -803,10 +908,11 @@ impl<'a> App<'a> {
              }
         }
         
-        // Sort: RUNNING first, then PENDING, then by finished_at descending for completed
+        // Sort: RUNNING/STUCK first, then PENDING, then by finished_at descending for completed
         new_tasks.sort_by(|a, b| {
             let state_order = |s: &str| match s {
                 "RUNNING" => 0,
+                "STUCK" => 0, // Group stuck with running
                 "PENDING" => 1,
                 "FAILED" => 2,
                 "DONE" => 3,

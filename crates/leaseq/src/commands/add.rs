@@ -23,13 +23,27 @@ pub async fn add_task(command: String, lease: Option<String>, node: Option<Strin
         // Local lease -> local node
         hostname::get()?.to_string_lossy().into_owned()
     } else {
-        // Slurm lease -> pick a node from heartbeats
+        // Slurm lease -> pick a LIVE node from heartbeats
         let hb_dir = root.join("hb");
         let files = lfs::list_files_sorted(&hb_dir).unwrap_or_default();
-        if let Some(f) = files.first() {
-            f.file_stem().unwrap().to_string_lossy().into_owned()
+        
+        let mut best_node = None;
+        let now = time::OffsetDateTime::now_utc();
+        let threshold = time::Duration::minutes(2);
+
+        for f in files {
+            if let Ok(hb) = lfs::read_json::<models::Heartbeat, _>(&f) {
+                if (now - hb.ts) < threshold {
+                    best_node = Some(hb.node);
+                    break;
+                }
+            }
+        }
+
+        if let Some(n) = best_node {
+            n
         } else {
-            return Err(anyhow::anyhow!("No active nodes found for lease {}. Please specify --node.", lease_id));
+            return Err(anyhow::anyhow!("No active nodes found for lease {} (checked {} heartbeats). Please specify --node or ensure runners are active.", lease_id, root.join("hb").display()));
         }
     };
 
