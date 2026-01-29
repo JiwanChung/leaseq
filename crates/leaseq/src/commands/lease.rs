@@ -3,7 +3,8 @@ use anyhow::{Result, Context};
 use std::process::Command;
 use std::io::Write;
 use tempfile::NamedTempFile;
-use leaseq_core::{config, models, fs as lfs};
+use leaseq_core::config;
+use std::collections::{HashSet, HashMap};
 
 #[derive(Subcommand)]
 pub enum LeaseCommands {
@@ -126,34 +127,11 @@ pub async fn create_lease_quiet(args: CreateLeaseArgs) -> Result<LeaseCreateResu
 
     let job_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
-    // REGISTER THE LEASE LOCALLY IMMEDIATELY
-    // This ensures 'leaseq status' sees it as PENDING even if the runner hasn't started yet.
-    register_lease_locally(&job_id, &args).ok();
-
     // Don't wait in TUI mode - just return immediately
     Ok(LeaseCreateResult {
         job_id: job_id.clone(),
         message: format!("Submitted Slurm job: {}", job_id),
     })
-}
-
-fn register_lease_locally(job_id: &str, args: &CreateLeaseArgs) -> Result<()> {
-    let lease_dir = config::leaseq_home_dir().join("runs").join(job_id);
-    let meta_dir = lease_dir.join("meta");
-    lfs::ensure_dir(&meta_dir)?;
-
-    let meta = models::LeaseMeta::Slurm {
-        lease_id: models::LeaseId(job_id.to_string()),
-        name: None,
-        created_at: time::OffsetDateTime::now_utc(),
-        slurm: models::SlurmLeaseConfig {
-            sbatch_args: args.sbatch_arg.clone(),
-        },
-        mode: models::ExecutionMode::ExclusivePerNode,
-    };
-
-    lfs::atomic_write_json(meta_dir.join("lease.json"), &meta)?;
-    Ok(())
 }
 
 /// Create a lease with CLI output (for non-TUI usage)
@@ -215,9 +193,6 @@ pub async fn create_lease(args: CreateLeaseArgs) -> Result<()> {
 
     let job_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
     println!("Submitted Slurm job: {}", job_id);
-
-    // REGISTER THE LEASE LOCALLY IMMEDIATELY
-    register_lease_locally(&job_id, &args).ok();
 
     // Wait for job to start if requested
     if args.wait > 0 {
@@ -300,19 +275,62 @@ async fn release_lease(lease_id: String) -> Result<()> {
 }
 
 async fn list_leases() -> Result<()> {
-    // Read index or just list directories in runs/
-    // Since we didn't implement the index yet, let's just list dirs in ~/.leaseq/runs
+    let mut leases = HashMap::new();
+
+    // 1. Scan Local Directory (~/.leaseq/runs/)
     let runs_dir = config::leaseq_home_dir().join("runs");
-    if !runs_dir.exists() {
-        println!("No leases found.");
-        return Ok(())
-    }
-    
-    for entry in std::fs::read_dir(runs_dir)? {
-        let entry = entry?;
-        if entry.path().is_dir() {
-            println!("{}", entry.file_name().to_string_lossy());
+    if runs_dir.exists() {
+        for entry in std::fs::read_dir(&runs_dir)? {
+            let entry = entry?;
+            if entry.path().is_dir() {
+                let id = entry.file_name().to_string_lossy().to_string();
+                leases.insert(id, "ARCHIVED/UNKNOWN".to_string());
+            }
         }
     }
+
+    // 2. Poll Slurm (squeue)
+    if let Ok(output) = Command::new("squeue")
+        .args(["--me", "--name=leaseq", "--noheader", "--format=%i %T %M"])
+        .output() 
+    {
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    let job_id = parts[0].to_string();
+                    let state = parts[1].to_string();
+                    let time = if parts.len() > 2 { parts[2] } else { "" };
+                    
+                    let status = format!("{} ({})", state, time);
+                    leases.insert(job_id, status);
+                }
+            }
+        }
+    }
+
+    // 3. Add Local Lease
+    // (Always present technically, but we check if it's explicitly initialized?)
+    // Actually, local lease is always "ACTIVE" conceptually.
+    leases.insert("local:hostname".to_string(), "ACTIVE (Local)".to_string());
+
+    if leases.is_empty() {
+        println!("No leases found.");
+        return Ok(());
+    }
+
+    println!("{:<20}  {}", "LEASE ID", "STATUS");
+    println!("{:<20}  {}", "--------", "------");
+    
+    // Sort keys
+    let mut keys: Vec<_> = leases.keys().collect();
+    keys.sort();
+
+    for id in keys {
+        let status = leases.get(id).unwrap();
+        println!("{:<20}  {}", id, status);
+    }
+
     Ok(())
 }
