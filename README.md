@@ -75,10 +75,9 @@ cp target/release/leaseq ~/.local/bin/
 # Start the local daemon (runs in background)
 leaseq daemon start
 
-# Add tasks to the queue
-leaseq add -- python train.py --epochs 100
-leaseq add -- python train.py --epochs 200 --lr 0.001
-leaseq add -- ./evaluate.sh
+# Submit tasks to the local queue
+leaseq submit -- python train.py --epochs 100
+leaseq submit -- python train.py --epochs 200 --lr 0.001
 
 # Monitor with TUI
 leaseq tui
@@ -92,12 +91,16 @@ leaseq logs <task_id>
 ### Slurm Mode
 
 ```bash
-# Create a lease (holds GPU nodes)
-leaseq lease create --partition gpu --gpus-per-node 4 --nodes 2 --time 4:00:00
+# Allocate an interactive lease (mimics salloc but persistent)
+leaseq add -- --partition=gpu --gres=gpu:1 --time=4:00:00
+# (Waits for job start, then auto-connects you to a shell on the node)
 
-# Add tasks to the Slurm lease
-leaseq add --lease <jobid> -- python distributed_train.py
-leaseq add --lease <jobid> -- python eval.py --checkpoint best.pt
+# Disconnect? Re-attach later:
+leaseq shell
+
+# Submit tasks to the existing Slurm lease (queue mode)
+leaseq submit --lease <jobid> -- python distributed_train.py
+leaseq submit --lease <jobid> -- python eval.py --checkpoint best.pt
 
 # Monitor
 leaseq tui --lease <jobid>
@@ -150,28 +153,33 @@ The terminal UI provides real-time monitoring of your tasks:
 | `z` | Maximize logs pane |
 | `f` | Toggle follow mode (in zoomed logs) |
 | `e` | Toggle stdout/stderr |
-| `a` | Add new task |
+| `a` | Add new task (Submit) |
 | `?` | Help |
 | `q` | Quit |
 
 ## CLI Reference
 
 ```bash
-leaseq add [--lease ID] [--node NAME] -- <COMMAND>   # Add a task
-leaseq status                                         # Show queue status
+# Allocations
+leaseq add [SLURM_ARGS]                              # Allocate new lease & shell (e.g. leaseq add --partition=gpu)
+leaseq lease release <ID>                            # Release/Cancel a lease
+leaseq shell [--lease ID]                            # Open interactive shell in active lease
+
+# Task Submission
+leaseq submit [--lease ID] [--node NAME] -- <CMD>    # Submit a task to queue
+leaseq cancel <TASK_ID>                              # Cancel a task
+
+# Monitoring
+leaseq status                                        # Show queue status
 leaseq tasks [--state STATE]                         # List tasks (states: pending, running, done, failed, stuck)
 leaseq logs <TASK_ID>                                # Show task logs
 leaseq follow <TASK_ID>                              # Follow logs in real-time
-leaseq cancel <TASK_ID>                              # Cancel a task
 leaseq tui [--lease ID]                              # Start TUI
 
-leaseq daemon start                                   # Start local runner
-leaseq daemon stop                                    # Stop local runner
-leaseq daemon status                                  # Check daemon status
-
-leaseq lease create [OPTIONS]                         # Create Slurm lease
-leaseq lease release <ID>                             # Release Slurm lease
-leaseq lease ls                                       # List leases
+# Daemon
+leaseq daemon start                                  # Start local runner
+leaseq daemon stop                                   # Stop local runner
+leaseq daemon status                                 # Check daemon status
 ```
 
 ## Architecture
