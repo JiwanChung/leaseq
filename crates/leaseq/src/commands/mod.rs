@@ -5,5 +5,7 @@ pub mod follow;
 pub mod lease;
 pub mod logs;
 pub mod run;
+pub mod shell;
 pub mod status;
+pub mod submit;
 pub mod tasks;

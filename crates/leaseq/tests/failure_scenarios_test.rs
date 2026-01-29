@@ -67,8 +67,8 @@ async fn test_add_picks_dead_node() -> Result<()> {
     };
     lfs::atomic_write_json(&hb_file, &hb)?;
 
-    // Add task without specifying node - Should FAIL now
-    let result = commands::add::run(vec!["echo".to_string(), "foo".to_string()], Some(lease_id.to_string()), None).await;
+    // 2. Submit task
+    let result = commands::submit::run(vec!["echo".to_string(), "foo".to_string()], Some(lease_id.to_string()), None).await;
 
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("No active nodes found"));
@@ -154,12 +154,12 @@ async fn test_blocking_task_heartbeat_gap() -> Result<()> {
     let lease_id = "local:blocking";
     let node = "node-block";
     
-    // 1. Submit a sleeping task (Long enough to cover heartbeat interval of 5s)
-    commands::add::run(
+    // 4. Submit task to that specific node
+    commands::submit::run(
         vec!["sleep".to_string(), "7".to_string()], 
         Some(lease_id.to_string()), 
         Some(node.to_string())
-    ).await?;
+    ).await.unwrap();
 
     // 2. Start runner in background task
     let run_fut = commands::run::run(commands::run::RunArgs {

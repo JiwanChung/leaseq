@@ -13,8 +13,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Add a task to the queue
-    Add {
+    /// Submit a task to an existing lease
+    Submit {
         #[arg(last = true, required = true)]
         command: Vec<String>,
 
@@ -23,6 +23,11 @@ enum Commands {
 
         #[arg(long)]
         node: Option<String>,
+    },
+    /// Allocate a new interactive lease (mimics salloc but persistent)
+    Add {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        slurm_args: Vec<String>,
     },
     /// Show status
     Status {
@@ -87,6 +92,14 @@ enum Commands {
         #[arg(long)]
         lease: Option<String>,
     },
+    /// Open an interactive shell in the lease
+    Shell {
+        #[arg(long)]
+        lease: Option<String>,
+
+        #[arg(long)]
+        node: Option<String>,
+    },
     /// Manage the local runner daemon
     #[command(subcommand)]
     Daemon(DaemonCommands),
@@ -129,8 +142,11 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Commands::Add { command, lease, node }) => {
-            commands::add::run(command, lease, node).await
+        Some(Commands::Submit { command, lease, node }) => {
+            commands::submit::run(command, lease, node).await
+        }
+        Some(Commands::Add { slurm_args }) => {
+            commands::add::run(slurm_args).await
         }
         Some(Commands::Status { lease }) => {
             commands::status::run(lease).await
@@ -146,6 +162,9 @@ async fn main() -> Result<()> {
         }
         Some(Commands::Cancel { task, lease }) => {
             commands::cancel::run(task, lease).await
+        }
+        Some(Commands::Shell { lease, node }) => {
+            commands::shell::run(lease, node).await
         }
         Some(Commands::Daemon(cmd)) => match cmd {
             DaemonCommands::Start => commands::daemon::start().await,

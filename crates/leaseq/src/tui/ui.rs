@@ -227,6 +227,10 @@ fn draw_task_detail(f: &mut Frame, app: &App, area: Rect) {
                 Span::raw(&task.node),
             ]),
             Line::from(vec![
+                Span::styled("PWD: ", Style::default().fg(Color::DarkGray)),
+                Span::raw(&task.cwd),
+            ]),
+            Line::from(vec![
                 Span::styled("GPUs: ", Style::default().fg(Color::DarkGray)),
                 Span::styled(gpu_str, Style::default().fg(Color::Magenta)),
             ]),

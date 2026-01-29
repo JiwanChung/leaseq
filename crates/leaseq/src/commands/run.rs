@@ -258,6 +258,7 @@ impl Runner {
                 stderr: String::new(),
                 runtime_s: 0.0,
                 command: spec.command.clone(),
+                cwd: spec.cwd.clone(),
                 gpus_requested: spec.gpus,
                 gpus_assigned: String::new(),
             };
@@ -329,6 +330,7 @@ impl Runner {
             stderr: format!("logs/{}.err", spec.task_id),
             runtime_s: runtime,
             command: spec.command.clone(),
+            cwd: spec.cwd.clone(),
             gpus_requested: spec.gpus,
             gpus_assigned,
         };

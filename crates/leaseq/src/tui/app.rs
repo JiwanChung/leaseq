@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use leaseq_core::{config, fs as lfs, models};
 use tui_textarea::TextArea;
-use crate::commands::{add, lease};
+use crate::commands::{submit, lease};
 use std::collections::HashMap;
 
 use crate::tui::ui;
@@ -160,6 +160,7 @@ pub struct NodeState {
 pub struct TaskState {
     pub id: String,
     pub command: String,
+    pub cwd: String,
     pub state: String,
     pub node: String,
     pub exit_code: Option<i32>,
@@ -717,7 +718,7 @@ impl<'a> App<'a> {
                 KeyCode::Enter => {
                     let cmd = self.textarea.lines().first().cloned().unwrap_or_default();
                     if !cmd.trim().is_empty() {
-                        let _ = add::add_task(cmd, Some(self.lease_id.clone()), None).await;
+                        let _ = submit::add_task(cmd, Some(self.lease_id.clone()), None).await;
                         self.refresh_data();
                     }
                     self.mode = Mode::Normal;
@@ -840,6 +841,7 @@ impl<'a> App<'a> {
                                     new_tasks.push(TaskState {
                                         id: spec.task_id,
                                         command: spec.command,
+                                        cwd: spec.cwd,
                                         state: if is_alive { "RUNNING".to_string() } else { "STUCK".to_string() },
                                         node: node_name.clone(),
                                         exit_code: None,
@@ -867,6 +869,7 @@ impl<'a> App<'a> {
                                     new_tasks.push(TaskState {
                                         id: spec.task_id,
                                         command: spec.command,
+                                        cwd: spec.cwd,
                                         state: "PENDING".to_string(),
                                         node: node_name.clone(),
                                         exit_code: None,
@@ -893,6 +896,7 @@ impl<'a> App<'a> {
                                     new_tasks.push(TaskState {
                                         id: res.task_id,
                                         command: res.command,
+                                        cwd: res.cwd,
                                         state: if res.exit_code == 0 { "DONE".to_string() } else { "FAILED".to_string() },
                                         node: res.node,
                                         exit_code: Some(res.exit_code),

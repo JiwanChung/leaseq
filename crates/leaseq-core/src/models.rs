@@ -82,8 +82,9 @@ pub struct TaskResult {
     pub stdout: String, // path relative to run dir
     pub stderr: String, // path relative to run dir
     pub runtime_s: f64,
-    #[serde(default)]
     pub command: String, // Original command for reference
+    #[serde(default)]
+    pub cwd: String, // Original working directory
     #[serde(default)]
     pub gpus_requested: u32, // GPUs requested
     #[serde(default)]

@@ -143,7 +143,8 @@ async fn test_atomic_workflow_local() -> Result<()> {
     
     // 1. Add Task
     let cmd = vec!["echo".to_string(), "hello".to_string()];
-    commands::add::run(cmd, Some(lease_id.to_string()), Some("node-1".to_string())).await?;
+    // Submit
+    commands::submit::run(cmd, Some(lease_id.to_string()), Some("node-1".to_string())).await?;
 
     // Verify task file exists
     // For local lease, it uses runtime dir
@@ -200,7 +201,8 @@ async fn test_failed_task() -> Result<()> {
     let ctx = TestContext::new()?;
     let lease_id = "local:fail";
     
-    commands::add::run(
+    // Submit failing task
+    commands::submit::run(
         vec!["false".to_string()], // 'false' returns exit code 1
         Some(lease_id.to_string()), 
         Some("node-1".to_string())

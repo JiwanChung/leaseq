@@ -117,6 +117,7 @@ fn cancel_pending_task(root: &Path, task_id: &str, node: &str) -> Result<()> {
                     stderr: String::new(),
                     runtime_s: 0.0,
                     command: spec.command.clone(),
+                    cwd: spec.cwd.clone(),
                     gpus_requested: spec.gpus,
                     gpus_assigned: String::new(),
                 };
