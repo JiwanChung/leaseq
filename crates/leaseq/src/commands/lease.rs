@@ -3,7 +3,7 @@ use anyhow::{Result, Context};
 use std::process::Command;
 use std::io::Write;
 use tempfile::NamedTempFile;
-use leaseq_core::config;
+use leaseq_core::{config, models, fs as lfs};
 
 #[derive(Subcommand)]
 pub enum LeaseCommands {
@@ -126,11 +126,34 @@ pub async fn create_lease_quiet(args: CreateLeaseArgs) -> Result<LeaseCreateResu
 
     let job_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
+    // REGISTER THE LEASE LOCALLY IMMEDIATELY
+    // This ensures 'leaseq status' sees it as PENDING even if the runner hasn't started yet.
+    register_lease_locally(&job_id, &args).ok();
+
     // Don't wait in TUI mode - just return immediately
     Ok(LeaseCreateResult {
         job_id: job_id.clone(),
         message: format!("Submitted Slurm job: {}", job_id),
     })
+}
+
+fn register_lease_locally(job_id: &str, args: &CreateLeaseArgs) -> Result<()> {
+    let lease_dir = config::leaseq_home_dir().join("runs").join(job_id);
+    let meta_dir = lease_dir.join("meta");
+    lfs::ensure_dir(&meta_dir)?;
+
+    let meta = models::LeaseMeta::Slurm {
+        lease_id: models::LeaseId(job_id.to_string()),
+        name: None,
+        created_at: time::OffsetDateTime::now_utc(),
+        slurm: models::SlurmLeaseConfig {
+            sbatch_args: args.sbatch_arg.clone(),
+        },
+        mode: models::ExecutionMode::ExclusivePerNode,
+    };
+
+    lfs::atomic_write_json(meta_dir.join("lease.json"), &meta)?;
+    Ok(())
 }
 
 /// Create a lease with CLI output (for non-TUI usage)
@@ -192,6 +215,9 @@ pub async fn create_lease(args: CreateLeaseArgs) -> Result<()> {
 
     let job_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
     println!("Submitted Slurm job: {}", job_id);
+
+    // REGISTER THE LEASE LOCALLY IMMEDIATELY
+    register_lease_locally(&job_id, &args).ok();
 
     // Wait for job to start if requested
     if args.wait > 0 {
