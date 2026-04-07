@@ -12,6 +12,8 @@
 
 ---
 
+# Deprecated in favour of [autolease](https://github.com/JiwanChung/autolease)
+
 **leaseq** is a lightweight task queue for researchers who need to run sequential experiments without releasing compute. It survives SSH disconnects, works on shared filesystems (NFSv4), and unifies local and Slurm workflows.
 
 ```
